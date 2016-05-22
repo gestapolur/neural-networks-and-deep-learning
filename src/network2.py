@@ -120,13 +120,15 @@ class Network(object):
         self.weights = [np.random.randn(y, x)
                         for x, y in zip(self.sizes[:-1], self.sizes[1:])]
 
-    def feedforward(self, a):
+    def feedforward(self, a, biases=None, weights=None):
         """Return the output of the network if ``a`` is input."""
-        for b, w in zip(self.biases, self.weights):
+        if not weights: weights = self.weights
+        if not biases: biases = self.biases
+        for b, w in zip(biases, weights):
             a = sigmoid(np.dot(w, a)+b)
         return a
 
-    def SGD(self, training_data, epochs, mini_batch_size, eta,
+    def SGD(self, training_data, epochs, mini_batch_size,
             lmbda = 0.0,
             evaluation_data=None,
             monitor_evaluation_cost=False,
@@ -162,8 +164,9 @@ class Network(object):
                 training_data[k:k+mini_batch_size]
                 for k in xrange(0, n, mini_batch_size)]
             for mini_batch in mini_batches:
-                self.update_mini_batch(
-                    mini_batch, eta, lmbda, len(training_data))
+                eta = self.update_mini_batch(
+                        mini_batch, lmbda, len(training_data))
+                print 'Mini-batch updated using eta', eta
             print "Epoch %s training complete" % j
             if monitor_training_cost:
                 cost = self.total_cost(training_data, lmbda)
@@ -187,7 +190,7 @@ class Network(object):
         return evaluation_cost, evaluation_accuracy, \
             training_cost, training_accuracy
 
-    def update_mini_batch(self, mini_batch, eta, lmbda, n):
+    def update_mini_batch(self, mini_batch, lmbda, n):
         """Update the network's weights and biases by applying gradient
         descent using backpropagation to a single mini batch.  The
         ``mini_batch`` is a list of tuples ``(x, y)``, ``eta`` is the
@@ -195,29 +198,50 @@ class Network(object):
         ``n`` is the total size of the training data set.
 
         """
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
-        for x, y in mini_batch:
-            delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-        self.weights = [(1-eta*(lmbda/n))*w-(eta/len(mini_batch))*nw
-                        for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b-(eta/len(mini_batch))*nb
-                       for b, nb in zip(self.biases, nabla_b)]
+        best_eta = None
+        min_cost = None
+        opt_biases = None
+        opt_weights = None
+        for eta_power in range(5, -6, -1):
+            eta = 10 ** eta_power
+            weights = self.weights
+            biases = self.biases
+            nabla_b = [np.zeros(b.shape) for b in self.biases]
+            nabla_w = [np.zeros(w.shape) for w in self.weights]
+            for x, y in mini_batch:
+                delta_nabla_b, delta_nabla_w = self.backprop(x, y, weights, biases)
+                nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
+                nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+            weights = [(1-eta*(lmbda/n))*w-(eta/len(mini_batch))*nw
+                       for w, nw in zip(self.weights, nabla_w)]
+            biases = [b-(eta/len(mini_batch))*nb
+                      for b, nb in zip(self.biases, nabla_b)]
+            cost = self.total_cost(mini_batch, lmbda, biases=biases, weights=weights)
+            print 'cost', cost, 'eta', eta
+            _ = input()
+            if not min_cost or cost < min_cost:
+                best_eta = eta
+                min_cost = cost
+                opt_biases = biases
+                opt_weights = weights
+                
+        # print 'Optimized eta on mini-batch:', best_eta
+        self.weights = opt_weights
+        self.biases = opt_biases
+        return best_eta
 
-    def backprop(self, x, y):
+    def backprop(self, x, y, weights, biases):
         """Return a tuple ``(nabla_b, nabla_w)`` representing the
         gradient for the cost function C_x.  ``nabla_b`` and
         ``nabla_w`` are layer-by-layer lists of numpy arrays, similar
         to ``self.biases`` and ``self.weights``."""
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
+        nabla_b = [np.zeros(b.shape) for b in biases]
+        nabla_w = [np.zeros(w.shape) for w in weights]
         # feedforward
         activation = x
         activations = [x] # list to store all the activations, layer by layer
         zs = [] # list to store all the z vectors, layer by layer
-        for b, w in zip(self.biases, self.weights):
+        for b, w in zip(biases, weights):
             z = np.dot(w, activation)+b
             zs.append(z)
             activation = sigmoid(z)
@@ -271,7 +295,7 @@ class Network(object):
                         for (x, y) in data]
         return sum(int(x == y) for (x, y) in results)
 
-    def total_cost(self, data, lmbda, convert=False):
+    def total_cost(self, data, lmbda, convert=False, biases=None, weights=None):
         """Return the total cost for the data set ``data``.  The flag
         ``convert`` should be set to False if the data set is the
         training data (the usual case), and to True if the data set is
@@ -279,12 +303,13 @@ class Network(object):
         reversed) convention for the ``accuracy`` method, above.
         """
         cost = 0.0
+        if not weights: weights = self.weights
         for x, y in data:
-            a = self.feedforward(x)
+            a = self.feedforward(x, biases=biases, weights=weights)
             if convert: y = vectorized_result(y)
             cost += self.cost.fn(a, y)/len(data)
         cost += 0.5*(lmbda/len(data))*sum(
-            np.linalg.norm(w)**2 for w in self.weights)
+            np.linalg.norm(w)**2 for w in weights)
         return cost
 
     def save(self, filename):
