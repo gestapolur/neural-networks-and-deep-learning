@@ -158,15 +158,22 @@ class Network(object):
         n = len(training_data)
         evaluation_cost, evaluation_accuracy = [], []
         training_cost, training_accuracy = [], []
+        record_eta = None
         for j in xrange(epochs):
             random.shuffle(training_data)
             mini_batches = [
                 training_data[k:k+mini_batch_size]
                 for k in xrange(0, n, mini_batch_size)]
-            for mini_batch in mini_batches:
-                eta = self.update_mini_batch(
+            if j < 5:
+                for mini_batch in mini_batches:
+                    record_eta = self.update_mini_batch(
                         mini_batch, lmbda, len(training_data))
-                print 'Mini-batch updated using eta', eta
+            else:
+                print 'Update mini batch using recorded eta', record_eta
+                for mini_batch in mini_batches:
+                    self.update_mini_batch(
+                        mini_batch, lmbda, len(training_data), record_eta=record_eta)
+                # print 'Mini-batch updated using eta', eta
             print "Epoch %s training complete" % j
             if monitor_training_cost:
                 cost = self.total_cost(training_data, lmbda)
@@ -190,7 +197,7 @@ class Network(object):
         return evaluation_cost, evaluation_accuracy, \
             training_cost, training_accuracy
 
-    def update_mini_batch(self, mini_batch, lmbda, n):
+    def update_mini_batch(self, mini_batch, lmbda, n, record_eta=None):
         """Update the network's weights and biases by applying gradient
         descent using backpropagation to a single mini batch.  The
         ``mini_batch`` is a list of tuples ``(x, y)``, ``eta`` is the
@@ -198,11 +205,23 @@ class Network(object):
         ``n`` is the total size of the training data set.
 
         """
+        if record_eta:
+            nabla_b = [np.zeros(b.shape) for b in self.biases]
+            nabla_w = [np.zeros(w.shape) for w in self.weights]
+            for x, y in mini_batch:
+                delta_nabla_b, delta_nabla_w = self.backprop(x, y, self.weights, self.biases)
+                nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
+                nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+            self.weights = [(1-record_eta*(lmbda/n))*w-(record_eta/len(mini_batch))*nw
+                            for w, nw in zip(self.weights, nabla_w)]
+            self.biases = [b-(record_eta/len(mini_batch))*nb
+                           for b, nb in zip(self.biases, nabla_b)]
+            return
         best_eta = None
         min_cost = None
         opt_biases = None
         opt_weights = None
-        for eta_power in range(5, -6, -1):
+        for eta_power in np.arange(3,-6.1,-0.5):
             eta = 10 ** eta_power
             weights = self.weights
             biases = self.biases
@@ -217,8 +236,9 @@ class Network(object):
             biases = [b-(eta/len(mini_batch))*nb
                       for b, nb in zip(self.biases, nabla_b)]
             cost = self.total_cost(mini_batch, lmbda, biases=biases, weights=weights)
-            print 'cost', cost, 'eta', eta
-            _ = input()
+            # print 'cost', cost, 'eta_power', eta_power, 'eta', eta, 'best_eta', best_eta
+            # import time
+            # time.sleep(1.0)
             if not min_cost or cost < min_cost:
                 best_eta = eta
                 min_cost = cost
