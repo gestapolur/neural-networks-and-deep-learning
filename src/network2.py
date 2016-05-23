@@ -16,6 +16,7 @@ features.
 import json
 import random
 import sys
+import copy
 
 # Third-party libraries
 import numpy as np
@@ -158,21 +159,28 @@ class Network(object):
         n = len(training_data)
         evaluation_cost, evaluation_accuracy = [], []
         training_cost, training_accuracy = [], []
-        record_eta = None
+        eta_mean = None
         for j in xrange(epochs):
+            record_eta = []
             random.shuffle(training_data)
             mini_batches = [
                 training_data[k:k+mini_batch_size]
                 for k in xrange(0, n, mini_batch_size)]
-            if j < 5:
+            if j < 30:
                 for mini_batch in mini_batches:
-                    record_eta = self.update_mini_batch(
+                    eta = self.update_mini_batch(
                         mini_batch, lmbda, len(training_data))
+                    record_eta.append(eta)  
+                    # print 'mini batch eta', record_eta
+		print "Eta", record_eta, np.mean(record_eta)
+		record_eta = np.mean(record_eta)
+                eta_mean = record_eta
+                # print 'cost on 'self.total_cost(training_data, lmbda)
             else:
-                print 'Update mini batch using recorded eta', record_eta
+                print 'Update mini batch using recorded eta', eta_mean
                 for mini_batch in mini_batches:
                     self.update_mini_batch(
-                        mini_batch, lmbda, len(training_data), record_eta=record_eta)
+                        mini_batch, lmbda, len(training_data), record_eta=eta_mean)
                 # print 'Mini-batch updated using eta', eta
             print "Epoch %s training complete" % j
             if monitor_training_cost:
@@ -218,36 +226,48 @@ class Network(object):
                            for b, nb in zip(self.biases, nabla_b)]
             return
         best_eta = None
-        min_cost = None
+        min_cost = 1e9
         opt_biases = None
         opt_weights = None
-        for eta_power in np.arange(3,-6.1,-0.5):
-            eta = 10 ** eta_power
-            weights = self.weights
-            biases = self.biases
-            nabla_b = [np.zeros(b.shape) for b in self.biases]
-            nabla_w = [np.zeros(w.shape) for w in self.weights]
-            for x, y in mini_batch:
-                delta_nabla_b, delta_nabla_w = self.backprop(x, y, weights, biases)
-                nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-                nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+        #for eta_power in np.arange(0.5, -6.1, -0.2):
+        #    eta = 10 ** eta_power
+        #    biases = copy.deepcopy(self.biases)
+        nabla_b = [np.zeros(b.shape) for b in self.biases]
+        nabla_w = [np.zeros(w.shape) for w in self.weights]
+        for x, y in mini_batch:
+            delta_nabla_b, delta_nabla_w = self.backprop(x, y, self.weights, self.biases)
+            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
+            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+
+        cpy_weights = copy.deepcopy(self.weights)
+        cpy_biases = copy.deepcopy(self.biases)
+        for eta_power in np.arange(-6.0, 3.1, 0.3):
+            eta = 10**eta_power
             weights = [(1-eta*(lmbda/n))*w-(eta/len(mini_batch))*nw
                        for w, nw in zip(self.weights, nabla_w)]
             biases = [b-(eta/len(mini_batch))*nb
                       for b, nb in zip(self.biases, nabla_b)]
-            cost = self.total_cost(mini_batch, lmbda, biases=biases, weights=weights)
+
+            self.weights = weights
+            self.biases = biases
+            cost = self.total_cost(mini_batch, lmbda)
             # print 'cost', cost, 'eta_power', eta_power, 'eta', eta, 'best_eta', best_eta
             # import time
-            # time.sleep(1.0)
-            if not min_cost or cost < min_cost:
+            # time.sleep(0.5)
+            #print eta, cost
+            if cost < min_cost:
                 best_eta = eta
                 min_cost = cost
-                opt_biases = biases
-                opt_weights = weights
-                
+                opt_biases = copy.deepcopy(self.biases)
+                opt_weights = copy.deepcopy(self.weights)
+
+            self.weights = copy.deepcopy(cpy_weights)
+            self.biases = copy.deepcopy(cpy_biases)
+        #print "="*10
         # print 'Optimized eta on mini-batch:', best_eta
         self.weights = opt_weights
         self.biases = opt_biases
+	# print '='*10
         return best_eta
 
     def backprop(self, x, y, weights, biases):
@@ -324,6 +344,7 @@ class Network(object):
         """
         cost = 0.0
         if not weights: weights = self.weights
+        if not biases: biases = self.biases
         for x, y in data:
             a = self.feedforward(x, biases=biases, weights=weights)
             if convert: y = vectorized_result(y)
